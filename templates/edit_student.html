@@ -12,18 +12,11 @@
 <!-- Navbar -->
 <nav class="navbar navbar-dark bg-dark">
     <div class="container">
-        <a class="navbar-brand" href="{{ url_for('dashboard') }}">
-            Student Portal
-        </a>
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">Student Portal</a>
 
         <div>
-            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm">
-                Dashboard
-            </a>
-
-            <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
-                Logout
-            </a>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm">Dashboard</a>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
         </div>
     </div>
 </nav>
@@ -31,57 +24,80 @@
 <div class="container mt-5">
 
     <div class="row justify-content-center">
-
-        <div class="col-md-6">
+        <div class="col-md-7">
 
             <div class="card shadow">
-
                 <div class="card-header bg-warning text-dark text-center">
-                    <h4>Edit Student</h4>
+                    <h4>Edit Student + Performance Data</h4>
                 </div>
 
                 <div class="card-body">
 
-                    <!-- Edit Form -->
+                    <!-- Flash Messages -->
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{category}}">
+                                    {{ message }}
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
                     <form method="POST">
+
+                        <!-- Basic Details -->
+                        <h5 class="mb-3">Student Details</h5>
 
                         <div class="mb-3">
                             <label class="form-label">Student Name</label>
-
-                            <input
-                                type="text"
-                                name="name"
-                                class="form-control"
-                                value="{{ student.name }}"
-                                required
-                            >
+                            <input type="text" name="name" class="form-control" value="{{ student.name }}" required>
                         </div>
 
                         <div class="mb-3">
                             <label class="form-label">Email</label>
-
-                            <input
-                                type="email"
-                                name="email"
-                                class="form-control"
-                                value="{{ student.email }}"
-                                required
-                            >
+                            <input type="email" name="email" class="form-control" value="{{ student.email }}" required>
                         </div>
 
                         <div class="mb-3">
                             <label class="form-label">Course</label>
-
-                            <input
-                                type="text"
-                                name="course"
-                                class="form-control"
-                                value="{{ student.course }}"
-                                required
-                            >
+                            <input type="text" name="course" class="form-control" value="{{ student.course }}" required>
                         </div>
 
-                        <div class="d-grid">
+                        <hr>
+
+                        <!-- Performance Inputs -->
+                        <h5 class="mb-3">Performance Inputs</h5>
+
+                        <div class="mb-3">
+                            <label class="form-label">Study Time (hours per week)</label>
+                            <input type="number" step="0.1" name="study_time" class="form-control"
+                                   value="{{ student.study_time }}" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Absences</label>
+                            <input type="number" name="absences" class="form-control"
+                                   value="{{ student.absences }}" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Previous Grade 1 (0 - 20)</label>
+                            <input type="number" step="0.1" name="g1" class="form-control"
+                                   value="{{ student.g1 }}" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Previous Grade 2 (0 - 20)</label>
+                            <input type="number" step="0.1" name="g2" class="form-control"
+                                   value="{{ student.g2 }}" required>
+                        </div>
+
+                        <div class="alert alert-info mt-4">
+                            <b>Note:</b> Predicted Score will be auto-updated when you click <b>Update Student</b>.
+                        </div>
+
+                        <div class="d-grid mt-2">
                             <button type="submit" class="btn btn-warning">
                                 Update Student
                             </button>
@@ -96,11 +112,9 @@
                     </div>
 
                 </div>
-
             </div>
 
         </div>
-
     </div>
 
 </div>

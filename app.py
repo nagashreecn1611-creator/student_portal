@@ -1,5 +1,11 @@
 import os
-from flask import Flask, render_template, redirect, url_for, request, flash, send_file
+import io
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from flask import Flask, render_template, redirect, url_for, request, flash, send_file, Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
     LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -11,42 +17,27 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 
-# --------------------------------
-# APP
-# --------------------------------
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key")
 
-# --------------------------------
-# DATABASE CONFIG (FIXED)
-# - If DATABASE_URL exists (Render Postgres) -> use it
-# - Else use Render-safe SQLite in /tmp
-# --------------------------------
+# DB: Postgres if DATABASE_URL exists, else Render-safe SQLite
 database_url = os.environ.get("DATABASE_URL")
-
 if database_url:
-    # Some platforms provide postgres:// but SQLAlchemy wants postgresql://
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 else:
-    # ✅ IMPORTANT FIX: Render writable location
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:////tmp/database.db"
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
-# --------------------------------
-# LOGIN MANAGER
-# --------------------------------
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = "login"
 
-# --------------------------------
-# MODELS
-# --------------------------------
+# ------------------ MODELS ------------------
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -54,28 +45,49 @@ class User(db.Model, UserMixin):
 
 class Student(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+
     name = db.Column(db.String(150), nullable=False)
     email = db.Column(db.String(150), nullable=False)
     course = db.Column(db.String(150), nullable=False)
+
+    study_time = db.Column(db.Float, nullable=False, default=0.0)
+    absences = db.Column(db.Integer, nullable=False, default=0)
+    g1 = db.Column(db.Float, nullable=False, default=0.0)
+    g2 = db.Column(db.Float, nullable=False, default=0.0)
+
+    predicted_score = db.Column(db.Float, nullable=False, default=0.0)
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# ✅ Create tables at startup (works on Render + local)
+# Create tables
 with app.app_context():
     db.create_all()
 
-# --------------------------------
-# ROUTES
-# --------------------------------
+# ------------------ PREDICTION (simple baseline) ------------------
+def predict_score(study_time, absences, g1, g2):
+    """
+    Baseline prediction:
+    - Start from avg of previous grades
+    - Study time increases score a bit
+    - Absences reduce score
+    Clamped 0..100
+    """
+    base = (g1 + g2) / 2.0
+    score = base * 5  # if g1,g2 are 0..20 style -> scale to 0..100
+    score += study_time * 3
+    score -= absences * 1.5
+    score = max(0, min(100, score))
+    return round(score, 2)
+
+# ------------------ ROUTES ------------------
 @app.route("/")
 def home():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     return redirect(url_for("login"))
 
-# -------- REGISTER --------
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if current_user.is_authenticated:
@@ -86,15 +98,14 @@ def register():
         password = request.form.get("password", "").strip()
 
         if not username or not password:
-            flash("Username and password are required!", "danger")
+            flash("Username and password required!", "danger")
             return redirect(url_for("register"))
 
         if User.query.filter_by(username=username).first():
             flash("Username already exists!", "danger")
             return redirect(url_for("register"))
 
-        hashed_password = generate_password_hash(password)
-        new_user = User(username=username, password_hash=hashed_password)
+        new_user = User(username=username, password_hash=generate_password_hash(password))
         db.session.add(new_user)
         db.session.commit()
 
@@ -103,7 +114,6 @@ def register():
 
     return render_template("register.html")
 
-# -------- LOGIN --------
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
@@ -114,7 +124,6 @@ def login():
         password = request.form.get("password", "").strip()
 
         user = User.query.filter_by(username=username).first()
-
         if user and check_password_hash(user.password_hash, password):
             login_user(user)
             flash("Login successful!", "success")
@@ -125,22 +134,19 @@ def login():
 
     return render_template("login.html")
 
-# -------- LOGOUT --------
 @app.route("/logout")
 @login_required
 def logout():
     logout_user()
-    flash("Logged out successfully!", "success")
+    flash("Logged out!", "success")
     return redirect(url_for("login"))
 
-# -------- DASHBOARD --------
 @app.route("/dashboard")
 @login_required
 def dashboard():
     students = Student.query.order_by(Student.id.desc()).all()
     return render_template("dashboard.html", students=students)
 
-# -------- ADD STUDENT --------
 @app.route("/add", methods=["GET", "POST"])
 @login_required
 def add_student():
@@ -149,11 +155,22 @@ def add_student():
         email = request.form.get("email", "").strip()
         course = request.form.get("course", "").strip()
 
+        study_time = float(request.form.get("study_time", 0))
+        absences = int(request.form.get("absences", 0))
+        g1 = float(request.form.get("g1", 0))
+        g2 = float(request.form.get("g2", 0))
+
         if not name or not email or not course:
-            flash("All fields are required!", "danger")
+            flash("Name, Email, Course are required!", "danger")
             return redirect(url_for("add_student"))
 
-        student = Student(name=name, email=email, course=course)
+        pred = predict_score(study_time, absences, g1, g2)
+
+        student = Student(
+            name=name, email=email, course=course,
+            study_time=study_time, absences=absences, g1=g1, g2=g2,
+            predicted_score=pred
+        )
         db.session.add(student)
         db.session.commit()
 
@@ -162,7 +179,6 @@ def add_student():
 
     return render_template("add_student.html")
 
-# -------- EDIT STUDENT --------
 @app.route("/edit/<int:student_id>", methods=["GET", "POST"])
 @login_required
 def edit_student(student_id):
@@ -173,9 +189,12 @@ def edit_student(student_id):
         student.email = request.form.get("email", "").strip()
         student.course = request.form.get("course", "").strip()
 
-        if not student.name or not student.email or not student.course:
-            flash("All fields are required!", "danger")
-            return redirect(url_for("edit_student", student_id=student_id))
+        student.study_time = float(request.form.get("study_time", 0))
+        student.absences = int(request.form.get("absences", 0))
+        student.g1 = float(request.form.get("g1", 0))
+        student.g2 = float(request.form.get("g2", 0))
+
+        student.predicted_score = predict_score(student.study_time, student.absences, student.g1, student.g2)
 
         db.session.commit()
         flash("Student updated successfully!", "success")
@@ -183,7 +202,6 @@ def edit_student(student_id):
 
     return render_template("edit_student.html", student=student)
 
-# -------- DELETE STUDENT --------
 @app.route("/delete/<int:student_id>", methods=["POST"])
 @login_required
 def delete_student(student_id):
@@ -193,13 +211,33 @@ def delete_student(student_id):
     flash("Student deleted successfully!", "success")
     return redirect(url_for("dashboard"))
 
-# -------- PDF DOWNLOAD --------
+# --------- GRAPH ----------
+@app.route("/graph.png")
+@login_required
+def graph_png():
+    students = Student.query.order_by(Student.id.asc()).all()
+    names = [s.name for s in students]
+    scores = [s.predicted_score for s in students]
+
+    fig = plt.figure(figsize=(8, 4))
+    plt.bar(names, scores)
+    plt.xticks(rotation=30, ha="right")
+    plt.title("Predicted Score by Student")
+    plt.ylabel("Predicted Score (0-100)")
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return Response(buf.getvalue(), mimetype="image/png")
+
+# --------- PDF ----------
 @app.route("/download_pdf")
 @login_required
 def download_pdf():
     students = Student.query.order_by(Student.id.asc()).all()
 
-    # ✅ Write PDF in /tmp (Render-safe)
     filename = "students_report.pdf"
     file_path = os.path.join("/tmp", filename)
 
@@ -207,23 +245,21 @@ def download_pdf():
     styles = getSampleStyleSheet()
     elements = []
 
-    elements.append(Paragraph("Student Portal - Students Report", styles["Title"]))
+    elements.append(Paragraph("Student Performance Report", styles["Title"]))
     elements.append(Spacer(1, 12))
     elements.append(Paragraph(f"Generated by: {current_user.username}", styles["Normal"]))
     elements.append(Spacer(1, 12))
 
-    data = [["ID", "Name", "Email", "Course"]]
+    data = [["ID", "Name", "Course", "StudyTime", "Abs", "G1", "G2", "Pred(0-100)"]]
     for s in students:
-        data.append([str(s.id), s.name, s.email, s.course])
+        data.append([s.id, s.name, s.course, s.study_time, s.absences, s.g1, s.g2, s.predicted_score])
 
-    table = Table(data, colWidths=[50, 150, 180, 130])
+    table = Table(data)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.black),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
-        ("PADDING", (0, 0), (-1, -1), 6),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
     ]))
 
     elements.append(table)
@@ -231,8 +267,5 @@ def download_pdf():
 
     return send_file(file_path, as_attachment=True, download_name=filename)
 
-# --------------------------------
-# LOCAL RUN
-# --------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
