@@ -45,7 +45,12 @@
             <a href="{{ url_for('add_student') }}" class="btn btn-primary">
                 + Add Student
             </a>
-            <a href="{{ url_for('download_pdf') }}" class="btn btn-success">
+
+            <a href="{{ url_for('prediction_page') }}" class="btn btn-success">
+                Predict Graph
+            </a>
+
+            <a href="{{ url_for('download_pdf') }}" class="btn btn-dark">
                 Download PDF
             </a>
         </div>
@@ -104,19 +109,6 @@
                 <p class="text-muted">No students found. Click <b>Add Student</b> to insert data.</p>
             {% endif %}
 
-        </div>
-    </div>
-
-    <!-- Graph Section -->
-    <div class="card shadow mt-4">
-        <div class="card-body">
-            <h4 class="mb-3">Prediction Graph</h4>
-
-            {% if students and students|length > 0 %}
-                <img src="{{ url_for('graph_png') }}" class="img-fluid" alt="Prediction Graph">
-            {% else %}
-                <p class="text-muted">Add students to generate the graph.</p>
-            {% endif %}
         </div>
     </div>
 

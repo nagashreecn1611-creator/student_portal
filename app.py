@@ -230,6 +230,13 @@ def graph_png():
     buf.seek(0)
     return Response(buf.getvalue(), mimetype="image/png")
 
+@app.route("/prediction")
+@login_required
+def prediction_page():
+    students = Student.query.order_by(Student.id.asc()).all()
+    return render_template("prediction.html", students=students)
+
+
 # --------- PDF ----------
 @app.route("/download_pdf")
 @login_required
