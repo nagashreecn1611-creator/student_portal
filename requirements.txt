@@ -5,3 +5,5 @@ werkzeug
 reportlab
 gunicorn
 psycopg2-binary
+matplotlib
+numpy
