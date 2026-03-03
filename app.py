@@ -11,11 +11,13 @@ from reportlab.lib import colors
 
 app = Flask(__name__)
 
-# ✅ Use Render env variable if available, else local default
+# ✅ SECRET KEY (Render -> Environment Variable, else local fallback)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key-change-this")
 
-# ✅ SQLite DB (works locally + Render)
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
+# ✅ SQLite in a writable place on Render
+# Render container may not allow writing to the code directory reliably.
+DB_PATH = os.environ.get("SQLITE_PATH", os.path.join("/tmp", "database.db"))
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + DB_PATH
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
@@ -43,9 +45,16 @@ class Student(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Create DB tables
-with app.app_context():
+# ✅ Ensure DB exists (important on Render)
+@app.before_first_request
+def create_tables():
     db.create_all()
+
+# ✅ Helpful error logging (so Render logs show exact issue)
+@app.errorhandler(500)
+def internal_error(e):
+    app.logger.exception("Internal Server Error: %s", e)
+    return "Internal Server Error - check Render Logs for details.", 500
 
 # -------------------------------
 # ROUTES
@@ -53,12 +62,10 @@ with app.app_context():
 
 @app.route("/")
 def home():
-    # If logged in go dashboard else login
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     return redirect(url_for("login"))
 
-# ✅ REGISTER
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if current_user.is_authenticated:
@@ -77,7 +84,6 @@ def register():
             return redirect(url_for("register"))
 
         hashed_password = generate_password_hash(password)
-
         new_user = User(username=username, password_hash=hashed_password)
         db.session.add(new_user)
         db.session.commit()
@@ -87,7 +93,6 @@ def register():
 
     return render_template("register.html")
 
-# ✅ LOGIN
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
@@ -103,13 +108,12 @@ def login():
             login_user(user)
             flash("Login successful!", "success")
             return redirect(url_for("dashboard"))
-        else:
-            flash("Invalid username or password", "danger")
-            return redirect(url_for("login"))
+
+        flash("Invalid username or password", "danger")
+        return redirect(url_for("login"))
 
     return render_template("login.html")
 
-# ✅ LOGOUT
 @app.route("/logout")
 @login_required
 def logout():
@@ -117,14 +121,12 @@ def logout():
     flash("Logged out successfully!", "success")
     return redirect(url_for("login"))
 
-# ✅ DASHBOARD - show students list
 @app.route("/dashboard")
 @login_required
 def dashboard():
     students = Student.query.order_by(Student.id.desc()).all()
     return render_template("dashboard.html", students=students)
 
-# ✅ ADD STUDENT
 @app.route("/add", methods=["GET", "POST"])
 @login_required
 def add_student():
@@ -146,7 +148,6 @@ def add_student():
 
     return render_template("add_student.html")
 
-# ✅ EDIT STUDENT
 @app.route("/edit/<int:student_id>", methods=["GET", "POST"])
 @login_required
 def edit_student(student_id):
@@ -167,7 +168,6 @@ def edit_student(student_id):
 
     return render_template("edit_student.html", student=student)
 
-# ✅ DELETE STUDENT (POST only)
 @app.route("/delete/<int:student_id>", methods=["POST"])
 @login_required
 def delete_student(student_id):
@@ -177,14 +177,13 @@ def delete_student(student_id):
     flash("Student deleted successfully!", "success")
     return redirect(url_for("dashboard"))
 
-# ✅ PDF DOWNLOAD
 @app.route("/download_pdf")
 @login_required
 def download_pdf():
     students = Student.query.order_by(Student.id.asc()).all()
 
     filename = "students_report.pdf"
-    file_path = os.path.join(os.getcwd(), filename)
+    file_path = os.path.join("/tmp", filename)  # writeable on Render
 
     doc = SimpleDocTemplate(file_path, pagesize=A4)
     styles = getSampleStyleSheet()
@@ -214,8 +213,5 @@ def download_pdf():
 
     return send_file(file_path, as_attachment=True, download_name=filename)
 
-# -------------------------------
-# RUN LOCAL
-# -------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
