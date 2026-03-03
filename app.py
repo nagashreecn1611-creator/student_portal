@@ -45,9 +45,8 @@ class Student(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# ✅ Ensure DB exists (important on Render)
-@app.before_first_request
-def create_tables():
+# ✅ Create DB tables at startup (Render + local)
+with app.app_context():
     db.create_all()
 
 # ✅ Helpful error logging (so Render logs show exact issue)
