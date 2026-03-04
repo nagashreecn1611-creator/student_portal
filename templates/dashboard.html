@@ -9,6 +9,11 @@
 
 <body style="background-color:#f4f4f4;">
 
+<form method="GET" action="{{ url_for('dashboard') }}"          class="mb-3">
+    <input type="text" name="search" class="form-control"
+           placeholder="Search student by name">
+</form>
+
 <!-- Navbar -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
